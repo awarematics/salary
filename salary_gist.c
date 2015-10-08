@@ -1,3 +1,6 @@
+/* 
+**  수정 테스트
+*/
 
 #include "postgres.h"
 
