@@ -85,7 +85,7 @@ Datum
 g_salary_consistent(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	void  *query = PG_GETARG_ARRAYTYPE_P_COPY(1);
+	int32		query = PG_GETARG_INT32(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
 	bool		retval;
 
