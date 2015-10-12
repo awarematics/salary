@@ -40,10 +40,16 @@ AS '$libdir/postgis-2.1'
 LANGUAGE C IMMUTABLE STRICT;
 
 
+
 -- Create the operator class for indexing
 
 CREATE OPERATOR CLASS gist_salary_ops
 DEFAULT FOR TYPE salary USING gist AS	
+	OPERATOR	1	< ,
+	OPERATOR	2	<= ,
+	OPERATOR	3	= ,
+	OPERATOR	4	>= ,
+	OPERATOR	5	> ,
 	FUNCTION	1	g_salary_consistent (internal, _int4, int, oid, internal),
 	FUNCTION	2	g_salary_union (internal, internal),
 	FUNCTION	3	g_salary_compress (internal),
