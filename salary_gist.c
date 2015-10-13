@@ -80,6 +80,79 @@ gbt_int4key_cmp(const void *a, const void *b)
 	return (ia->lower > ib->lower) ? 1 : -1;
 }
 
+static float8
+gbt_int4_dist(const void *a, const void *b)
+{
+	return GET_FLOAT_DISTANCE(int32, a, b);
+}
+
+
+static const gbtree_ninfo tinfo =
+{
+	gbt_t_int4,
+	sizeof(int32),
+	8,							/* sizeof(gbtreekey8) */
+	gbt_int4gt,
+	gbt_int4ge,
+	gbt_int4eq,
+	gbt_int4le,
+	gbt_int4lt,
+	gbt_int4key_cmp,
+	gbt_int4_dist
+};
+
+/*
+ * The GiST consistent method
+ *
+ * Note: we currently assume that no datatypes that use this routine are
+ * collation-aware; so we don't bother passing collation through.
+ */
+bool
+gbt_num_consistent(const GBT_NUMKEY_R *key,
+				   const void *query,
+				   const StrategyNumber *strategy,
+				   bool is_leaf,
+				   const gbtree_ninfo *tinfo)
+{
+	bool		retval;
+
+	switch (*strategy)
+	{
+		case BTLessEqualStrategyNumber:
+			retval = (*tinfo->f_ge) (query, key->lower);
+			break;
+		case BTLessStrategyNumber:
+			if (is_leaf)
+				retval = (*tinfo->f_gt) (query, key->lower);
+			else
+				retval = (*tinfo->f_ge) (query, key->lower);
+			break;
+		case BTEqualStrategyNumber:
+			if (is_leaf)
+				retval = (*tinfo->f_eq) (query, key->lower);
+			else
+				retval = ((*tinfo->f_le) (key->lower, query) && (*tinfo->f_le) (query, key->upper)) ? true : false;
+			break;
+		case BTGreaterStrategyNumber:
+			if (is_leaf)
+				retval = (*tinfo->f_lt) (query, key->upper);
+			else
+				retval = (*tinfo->f_le) (query, key->upper);
+			break;
+		case BTGreaterEqualStrategyNumber:
+			retval = (*tinfo->f_le) (query, key->upper);
+			break;
+		case BtreeGistNotEqualStrategyNumber:
+			retval = (!((*tinfo->f_eq) (query, key->lower) &&
+						(*tinfo->f_eq) (query, key->upper))) ? true : false;
+			break;
+		default:
+			retval = false;
+	}
+
+	return (retval);
+}
+
 
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS)
@@ -87,42 +160,21 @@ g_salary_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	int32		query = PG_GETARG_INT32(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-	bool		retval;
-
+	
 	/* Oid		subtype = PG_GETARG_OID(3); */
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
-	/* We set recheck to false to avoid repeatedly pulling every "possibly matched" geometry
-	   out during index scans. For cases when the geometries are large, rechecking
-	   can make things twice as slow. */
+	int32KEY   *kkk = (int32KEY *) DatumGetPointer(entry->key);
+	GBT_NUMKEY_R key;
+
+	/* All cases served by this function are exact */
 	*recheck = false;
-		
-	/* Quick sanity check on query argument. */
-	if ( DatumGetPointer(PG_GETARG_DATUM(1)) == NULL )
-	{		
-		PG_RETURN_BOOL(FALSE); /* NULL query! This is screwy! */
-	}
 	
-	/* Quick sanity check on entry key. */
-	if ( DatumGetPointer(entry->key) == NULL )
-	{	
-		PG_RETURN_BOOL(FALSE); /* NULL entry! */
-	}
-	
-	/* Treat leaf node tests different from internal nodes */
-	if (GIST_LEAF(entry))
-	{
-		retval = g_salary_consistent_leaf(
-		             (BOX2DF*)DatumGetPointer(entry->key),
-		             &query_gbox_index, strategy);
-	}
-	else
-	{
-		retval = g_salary_consistent_internal(
-		             (BOX2DF*)DatumGetPointer(entry->key),
-		             &query_gbox_index, strategy);
-	}
-	
-	PG_RETURN_BOOL(retval);
+	key.lower = (GBT_NUMKEY *) &kkk->lower;
+	key.upper = (GBT_NUMKEY *) &kkk->upper;
+
+	PG_RETURN_BOOL(
+				   gbt_num_consistent(&key, (void *) &query, &strategy, GIST_LEAF(entry), &tinfo)
+		);	
 }
 
 
