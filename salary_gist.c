@@ -7,6 +7,16 @@
 #include "access/gist.h"
 #include "access/skey.h"
 
+#include "salary_gist.h"
+
+
+typedef struct int32key
+{
+	int32		lower;
+	int32		upper;
+} int32KEY;
+
+
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS);
 Datum
@@ -80,13 +90,6 @@ gbt_int4key_cmp(const void *a, const void *b)
 	return (ia->lower > ib->lower) ? 1 : -1;
 }
 
-static float8
-gbt_int4_dist(const void *a, const void *b)
-{
-	return GET_FLOAT_DISTANCE(int32, a, b);
-}
-
-
 static const gbtree_ninfo tinfo =
 {
 	gbt_t_int4,
@@ -97,8 +100,7 @@ static const gbtree_ninfo tinfo =
 	gbt_int4eq,
 	gbt_int4le,
 	gbt_int4lt,
-	gbt_int4key_cmp,
-	gbt_int4_dist
+	gbt_int4key_cmp
 };
 
 /*
