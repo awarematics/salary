@@ -204,22 +204,7 @@ g_salary_compress(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	GISTENTRY  *retval;
 	
-	if (entry->leafkey)
-	{
-		GBT_VARKEY *r = NULL;
-		bytea	   *leaf = (bytea *) DatumGetPointer(PG_DETOAST_DATUM(entry->key));
-		GBT_VARKEY_R u;
-
-		u.lower = u.upper = leaf;
-		r = gbt_var_key_copy(&u, FALSE);
-
-		retval = palloc(sizeof(GISTENTRY));
-		gistentryinit(*retval, PointerGetDatum(r),
-					  entry->rel, entry->page,
-					  entry->offset, TRUE);
-	}
-	else
-		retval = entry;
+	
 				
 	PG_RETURN_POINTER(retval);
 }
