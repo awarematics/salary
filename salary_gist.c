@@ -17,6 +17,14 @@ typedef struct int32key
 } int32KEY;
 
 
+GISTENTRY *
+gbt_num_compress(GISTENTRY *retval, GISTENTRY *entry, const gbtree_ninfo *tinfo);
+bool
+gbt_num_consistent(const GBT_NUMKEY_R *key,
+				   const void *query,
+				   const StrategyNumber *strategy,
+				   bool is_leaf,
+				   const gbtree_ninfo *tinfo);
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS);
 Datum
@@ -103,6 +111,89 @@ static const gbtree_ninfo tinfo =
 	gbt_int4key_cmp
 };
 
+
+
+GISTENTRY *
+gbt_num_compress(GISTENTRY *retval, GISTENTRY *entry, const gbtree_ninfo *tinfo)
+{
+	if (entry->leafkey)
+	{
+		union
+		{
+			int16		i2;
+			int32		i4;
+			int64		i8;
+			float4		f4;
+			float8		f8;
+			DateADT		dt;
+			TimeADT		tm;
+			Timestamp	ts;
+			Cash		ch;
+		}			v;
+
+		GBT_NUMKEY *r = (GBT_NUMKEY *) palloc0(tinfo->indexsize);
+		void	   *leaf = NULL;
+
+		switch (tinfo->t)
+		{
+			case gbt_t_int2:
+				v.i2 = DatumGetInt16(entry->key);
+				leaf = &v.i2;
+				break;
+			case gbt_t_int4:
+				v.i4 = DatumGetInt32(entry->key);
+				leaf = &v.i4;
+				break;
+			case gbt_t_int8:
+				v.i8 = DatumGetInt64(entry->key);
+				leaf = &v.i8;
+				break;
+			case gbt_t_oid:
+				v.i4 = DatumGetObjectId(entry->key);
+				leaf = &v.i4;
+				break;
+			case gbt_t_float4:
+				v.f4 = DatumGetFloat4(entry->key);
+				leaf = &v.f4;
+				break;
+			case gbt_t_float8:
+				v.f8 = DatumGetFloat8(entry->key);
+				leaf = &v.f8;
+				break;
+			case gbt_t_date:
+				v.dt = DatumGetDateADT(entry->key);
+				leaf = &v.dt;
+				break;
+			case gbt_t_time:
+				v.tm = DatumGetTimeADT(entry->key);
+				leaf = &v.tm;
+				break;
+			case gbt_t_ts:
+				v.ts = DatumGetTimestamp(entry->key);
+				leaf = &v.ts;
+				break;
+			case gbt_t_cash:
+				v.ch = DatumGetCash(entry->key);
+				leaf = &v.ch;
+				break;
+			default:
+				leaf = DatumGetPointer(entry->key);
+		}
+
+		Assert(tinfo->indexsize >= 2 * tinfo->size);
+
+		memcpy((void *) &r[0], leaf, tinfo->size);
+		memcpy((void *) &r[tinfo->size], leaf, tinfo->size);
+		retval = palloc(sizeof(GISTENTRY));
+		gistentryinit(*retval, PointerGetDatum(r), entry->rel, entry->page,
+					  entry->offset, FALSE);
+	}
+	else
+		retval = entry;
+
+	return retval;
+}
+
 /*
  * The GiST consistent method
  *
@@ -183,16 +274,7 @@ g_salary_consistent(PG_FUNCTION_ARGS)
 Datum
 g_salary_union(PG_FUNCTION_ARGS)
 {
-	GistEntryVector *entryvec = (GistEntryVector *) PG_GETARG_POINTER(0);
-	int		   *size = (int *) PG_GETARG_POINTER(1);
-	int	numranges, i;
 	
-	numranges = entryvec->n;
-	
-	for ( i = 1; i < numranges; i++ )
-	{
-		
-	}
 	
 	PG_RETURN_POINTER(PG_GETARG_POINTER(0));
 }
@@ -202,11 +284,9 @@ Datum
 g_salary_compress(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	GISTENTRY  *retval;
-	
-	
-				
-	PG_RETURN_POINTER(retval);
+	GISTENTRY  *retval = NULL;
+
+	PG_RETURN_POINTER(gbt_num_compress(retval, entry, &tinfo));
 }
 
 Datum
@@ -220,10 +300,11 @@ g_salary_decompress(PG_FUNCTION_ARGS)
 Datum
 g_salary_penalty(PG_FUNCTION_ARGS)
 {
-	GISTENTRY  *origentry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	GISTENTRY  *newentry = (GISTENTRY *) PG_GETARG_POINTER(1);
+	int32KEY   *origentry = (int32KEY *) DatumGetPointer(((GISTENTRY *) PG_GETARG_POINTER(0))->key);
+	int32KEY   *newentry = (int32KEY *) DatumGetPointer(((GISTENTRY *) PG_GETARG_POINTER(1))->key);
 	float	   *result = (float *) PG_GETARG_POINTER(2);
-	
+
+	penalty_num(result, origentry->lower, origentry->upper, newentry->lower, newentry->upper);
 	
 				
 	PG_RETURN_POINTER(result);
@@ -233,8 +314,7 @@ g_salary_penalty(PG_FUNCTION_ARGS)
 Datum
 g_salary_same(PG_FUNCTION_ARGS)
 {
-	Datum		d1 = PG_GETARG_DATUM(0);
-	Datum		d2 = PG_GETARG_DATUM(1);
+	
 	bool	   *result = (bool *) PG_GETARG_POINTER(2);
 
 	//TODO 비교 함수
@@ -246,12 +326,9 @@ g_salary_same(PG_FUNCTION_ARGS)
 Datum
 g_salary_picksplit(PG_FUNCTION_ARGS)
 {
-	GistEntryVector *entryvec = (GistEntryVector *) PG_GETARG_POINTER(0);
+	
 	GIST_SPLITVEC *v = (GIST_SPLITVEC *) PG_GETARG_POINTER(1);
-	OffsetNumber i,
-				maxoff;
-				
-	maxoff = entryvec->n - 1;
+	
 				
 	PG_RETURN_POINTER(v);
 }

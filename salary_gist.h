@@ -83,3 +83,23 @@ typedef struct
 	//float8		(*f_dist) (const void *, const void *); /* key distance function */
 } gbtree_ninfo;
 
+
+
+/*
+ * Note: The factor 0.49 in following macro avoids floating point overflows
+ */
+#define penalty_num(result,olower,oupper,nlower,nupper) do { \
+  double	tmp = 0.0F; \
+  (*(result))	= 0.0F; \
+  if ( (nupper) > (oupper) ) \
+	  tmp += ( ((double)nupper)*0.49F - ((double)oupper)*0.49F ); \
+  if (	(olower) > (nlower)  ) \
+	  tmp += ( ((double)olower)*0.49F - ((double)nlower)*0.49F ); \
+  if (tmp > 0.0F) \
+  { \
+	(*(result)) += FLT_MIN; \
+	(*(result)) += (float) ( ((double)(tmp)) / ( (double)(tmp) + ( ((double)(oupper))*0.49F - ((double)(olower))*0.49F ) ) ); \
+	(*(result)) *= (FLT_MAX / (((GISTENTRY *) PG_GETARG_POINTER(0))->rel->rd_att->natts + 1)); \
+  } \
+} while (0);
+

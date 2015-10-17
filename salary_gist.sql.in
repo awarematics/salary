@@ -1,45 +1,38 @@
-﻿CREATE TYPE salary as (
-	salary int
-);
 
-CREATE TABLE g_salary(a int, b salary);
-
-CREATE FUNCTION g_salary_consistent(internal,int4,int,oid,internal)
+CREATE OR REPLACE FUNCTION g_salary_consistent(internal,int4,int,oid,internal)
 RETURNS bool
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_consistent'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION g_salary_compress(internal)
+CREATE OR REPLACE FUNCTION g_salary_compress(internal)
 RETURNS internal
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_compress'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION g_salary_decompress(internal)
+CREATE OR REPLACE FUNCTION g_salary_decompress(internal)
 RETURNS internal
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_decompress'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION g_salary_penalty(internal,internal,internal)
+CREATE OR REPLACE FUNCTION g_salary_penalty(internal,internal,internal)
 RETURNS internal
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_penalty'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION g_salary_picksplit(internal, internal)
+CREATE OR REPLACE FUNCTION g_salary_picksplit(internal, internal)
 RETURNS internal
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_picksplit'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION g_salary_union(internal, internal)
-RETURNS _int4
-AS '$libdir/postgis-2.1'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE FUNCTION g_salary_same(internal, internal, internal)
+CREATE OR REPLACE FUNCTION g_salary_union(internal, internal)
 RETURNS internal
-AS '$libdir/postgis-2.1'
+AS 'MODULE_PATHNAME','g_salary_union'
 LANGUAGE C IMMUTABLE STRICT;
 
-
+CREATE OR REPLACE FUNCTION g_salary_same(internal, internal, internal)
+RETURNS internal
+AS 'MODULE_PATHNAME','g_salary_same'
+LANGUAGE C IMMUTABLE STRICT;
 
 -- Create the operator class for indexing
 
@@ -57,4 +50,3 @@ DEFAULT FOR TYPE salary USING gist AS
 	FUNCTION	5	g_salary_penalty (internal, internal, internal),
 	FUNCTION	6	g_salary_picksplit (internal, internal),
 	FUNCTION	7	g_salary_same (internal, internal, internal);
-
