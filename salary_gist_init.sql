@@ -1,4 +1,5 @@
-﻿CREATE TYPE salary as (
+﻿// CREATE TYPE, TABLE 
+CREATE TYPE salary as (
 	salary int
 );
 CREATE TYPE salary as (
