@@ -1,4 +1,12 @@
-﻿CREATE TYPE tpoint as (
+-- 
+-- 기현아.. 다음을 보고 했으면 좋겠다..  변수선언으로..
+-- http://stackoverflow.com/questions/36959/how-do-you-use-script-variables-in-postgresql
+-- 그리고 디렉토리는.... 몇번 얘기했지만 독립적인데로 바꿔야해...
+--  /usr/local/posttrajectory/test/  이렇게 하던가..... 
+-- 
+
+
+CREATE TYPE tpoint as (
 	point	geometry,
 	ts	timestamp with time zone);
 
