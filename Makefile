@@ -14,8 +14,10 @@ POSTGIS_PGSQL_VERSION=93
 MODULE_big=salary_gist
 MODULEDIR=share/contrib/$(MODULE_big)
 
+psql = /usr/local/pgsql/bin/psql
+
 pgsql = /usr/local/pgsql
-libdir = /usr/local/pgsql/lib
+libdir = $(MODULEDIR)/lib
 includedir = /usr/local/pgsql/include
 
 includedir_server = $(includedir)/server
@@ -25,7 +27,8 @@ CC=gcc
 # PostTrajectory objects
 PG_OBJS = salary_gist.o
 PG_SO = salary_gist.so
-PG_SQL = salary_gist.sql 
+PG_SQL = salary_gist.sql
+PG_SQL_uninstall =  salary_gist_uninstall.sql
 
 
 all:
@@ -37,13 +40,17 @@ clean:
 	rm -f $(PG_SO)
 
 install: installdirs
-	cp $(PG_SO) $(libdir)
+	cp $(PG_SO) $(pgsql)/$(libdir)
 	cp $(PG_SQL) $(pgsql)/$(MODULEDIR)
+	cp $(PG_SQL_uninstall) $(pgsql)/$(MODULEDIR)
+	$(psql) -U postgres postgres < /usr/local/pgsql/share/contrib/salary_gist/salary_gist.sql
 
 installdirs:
 	mkdir $(pgsql)/$(MODULEDIR)
+	mkdir $(pgsql)/$(libdir)
 
 uninstall: 
-	rm -f $(libdir)/$(PG_SO)
+#	rm -f $(libdir)/$(PG_SO)
+	$(psql) -U postgres postgres < /usr/local/pgsql/share/contrib/salary_gist/salary_gist_uninstall.sql
 	rm -rf $(pgsql)/$(MODULEDIR)
 	
