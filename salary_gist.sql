@@ -1,10 +1,4 @@
--- 
--- 기현아.. 다음을 보고 했으면 좋겠다..  변수선언으로..
--- http://stackoverflow.com/questions/36959/how-do-you-use-script-variables-in-postgresql
--- 그리고 디렉토리는.... 몇번 얘기했지만 독립적인데로 바꿔야해...
---  /usr/local/posttrajectory/test/  이렇게 하던가..... 
--- 
-
+\set SALARY_LIB '/usr/local/posttrajectory/test/salary_gist/lib/salary_gist'
 
 CREATE TYPE tpoint as (
 	point	geometry,
@@ -17,37 +11,37 @@ CREATE TABLE g_salary(id int, traj trajectory);
 
 CREATE OR REPLACE FUNCTION g_salary_consistent(internal,int4,int,oid,internal)
 RETURNS bool
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_consistent'
+AS :'SALARY_LIB','g_salary_consistent'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_compress(internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_compress'
+AS :'SALARY_LIB','g_salary_compress'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_decompress(internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_decompress'
+AS :'SALARY_LIB','g_salary_decompress'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_penalty(internal,internal,internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_penalty'
+AS :'SALARY_LIB','g_salary_penalty'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_picksplit(internal, internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_picksplit'
+AS :'SALARY_LIB','g_salary_picksplit'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_union(internal, internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_union'
+AS :'SALARY_LIB','g_salary_union'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION g_salary_same(internal, internal, internal)
 RETURNS internal
-AS '/usr/local/pgsql/share/contrib/salary_gist/lib/salary_gist','g_salary_same'
+AS :'SALARY_LIB','g_salary_same'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OPERATOR CLASS g_salary_ops

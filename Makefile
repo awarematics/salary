@@ -12,7 +12,8 @@
 
 POSTGIS_PGSQL_VERSION=93
 SALARY=salary_gist
-SALARYDIR=/usr/local/posttrajectory/teset/$(SALARY)
+ROOTDIR=/usr/local/posttrajectory
+SALARYDIR=$(ROOTDIR)/test/$(SALARY)
 
 # PostgreSQL psql
 PSQL = /usr/local/pgsql/bin/psql
@@ -44,15 +45,15 @@ clean:
 
 install: installdirs 
 	cp $(SALARY_SO) $(trjlibdir)
-	cp $(SALARY_SQL) $(SALAIRYDIR)	
-	cp $(SALARY_SQL_uninstall) $(SAILARYDIR)
-	$(PSQL) -U postgres postgres < $(SALARIYDIR)/$(SALARY_SQL)
+	cp $(SALARY_SQL) $(SALARYDIR)	
+	cp $(SALARY_SQL_uninstall) $(SALARYDIR)
+	$(PSQL) -U postgres postgres < $(SALARYDIR)/$(SALARY_SQL)
 
 installdirs:
-	mkdir $(SAIARYDIR)
+	mkdir -p $(SALARYDIR)
 	mkdir $(trjlibdir)
 
 uninstall:   
-	$(PSQL) -U postgres postgres < $(SIALARIYDIR)/$(SALARY_SQL_uninstall)
+	$(PSQL) -U postgres postgres < $(SALARYDIR)/$(SALARY_SQL_uninstall)
 	rm -rf $(SALARYDIR)
 	
