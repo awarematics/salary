@@ -15,6 +15,9 @@ SALARY=salary_gist
 ROOTDIR=/usr/local/posttrajectory
 SALARYDIR=$(ROOTDIR)/test/$(SALARY)
 
+#GeoHash Library
+GEOHASHDIR=./geohash
+
 # PostgreSQL psql
 PSQL = /usr/local/pgsql/bin/psql
 
@@ -35,13 +38,19 @@ SALARY_SQL = salary_gist.sql
 SALARY_SQL_uninstall =  salary_gist_uninstall.sql
 
 
-all:
-	$(CC) -fpic -c salary_gist.c -I$(includedir_server)
+all: geohashLib
+	$(CC) -fpic -c salary_gist.c -I$(includedir_server) -I$(GEOHASHDIR)
 	$(CC) -shared -o $(SALARY_SO) $(SALARY_O)
+
+geohashLib: 
+	$(CC) -c $(GEOHASHDIR)/geohash.c -o $(GEOHASHDIR)/geohash.o 
+	ar rcs $(GEOHASHDIR)/libgeohash.a $(GEOHASHDIR)/geohash.o
+	rm $(GEOHASHDIR)/geohash.o
 
 clean:
 	rm -f $(SALARY_O)
 	rm -f $(SALARY_SO)
+	rm -f $(GEOHASHDIR)/libgeohash.a
 
 install: installdirs 
 	cp $(SALARY_SO) $(trjlibdir)

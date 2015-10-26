@@ -8,6 +8,7 @@
 #include "access/skey.h"
 
 #include "salary_gist.h"
+#include "./geohash/geohash.h"
 
 
 typedef struct int32key
@@ -25,6 +26,10 @@ gbt_num_consistent(const GBT_NUMKEY_R *key,
 				   const StrategyNumber *strategy,
 				   bool is_leaf,
 				   const gbtree_ninfo *tinfo);
+				   float *
+gbt_var_penalty(float *res, const GISTENTRY *o, const GISTENTRY *n,
+				Oid collation, const gbtree_vinfo *tinfo);
+				
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS);
 Datum
@@ -56,61 +61,72 @@ PG_FUNCTION_INFO_V1(g_salary_same);
 /* define for comparison */
 
 static bool
-gbt_int4gt(const void *a, const void *b)
+gbt_textgt(const void *a, const void *b, Oid collation)
 {
-	return (*((const int32 *) a) > *((const int32 *) b));
+	return DatumGetBool(DirectFunctionCall2Coll(text_gt,
+												collation,
+												PointerGetDatum(a),
+												PointerGetDatum(b)));
 }
+
 static bool
-gbt_int4ge(const void *a, const void *b)
+gbt_textge(const void *a, const void *b, Oid collation)
 {
-	return (*((const int32 *) a) >= *((const int32 *) b));
+	return DatumGetBool(DirectFunctionCall2Coll(text_ge,
+												collation,
+												PointerGetDatum(a),
+												PointerGetDatum(b)));
 }
+
 static bool
-gbt_int4eq(const void *a, const void *b)
+gbt_texteq(const void *a, const void *b, Oid collation)
 {
-	return (*((const int32 *) a) == *((const int32 *) b));
+	return DatumGetBool(DirectFunctionCall2Coll(texteq,
+												collation,
+												PointerGetDatum(a),
+												PointerGetDatum(b)));
 }
+
 static bool
-gbt_int4le(const void *a, const void *b)
+gbt_textle(const void *a, const void *b, Oid collation)
 {
-	return (*((const int32 *) a) <= *((const int32 *) b));
+	return DatumGetBool(DirectFunctionCall2Coll(text_le,
+												collation,
+												PointerGetDatum(a),
+												PointerGetDatum(b)));
 }
+
 static bool
-gbt_int4lt(const void *a, const void *b)
+gbt_textlt(const void *a, const void *b, Oid collation)
 {
-	return (*((const int32 *) a) < *((const int32 *) b));
+	return DatumGetBool(DirectFunctionCall2Coll(text_lt,
+												collation,
+												PointerGetDatum(a),
+												PointerGetDatum(b)));
 }
 
-static int
-gbt_int4key_cmp(const void *a, const void *b)
+static int32
+gbt_textcmp(const void *a, const void *b, Oid collation)
 {
-	int32KEY   *ia = (int32KEY *) (((const Nsrt *) a)->t);
-	int32KEY   *ib = (int32KEY *) (((const Nsrt *) b)->t);
-
-	if (ia->lower == ib->lower)
-	{
-		if (ia->upper == ib->upper)
-			return 0;
-
-		return (ia->upper > ib->upper) ? 1 : -1;
-	}
-
-	return (ia->lower > ib->lower) ? 1 : -1;
+	return DatumGetInt32(DirectFunctionCall2Coll(bttextcmp,
+												 collation,
+												 PointerGetDatum(a),
+												 PointerGetDatum(b)));
 }
 
-static const gbtree_ninfo tinfo =
+static gbtree_vinfo tinfo =
 {
-	gbt_t_int4,
-	sizeof(int32),
-	8,							/* sizeof(gbtreekey8) */
-	gbt_int4gt,
-	gbt_int4ge,
-	gbt_int4eq,
-	gbt_int4le,
-	gbt_int4lt,
-	gbt_int4key_cmp
+	gbt_t_text,
+	0,
+	FALSE,
+	gbt_textgt,
+	gbt_textge,
+	gbt_texteq,
+	gbt_textle,
+	gbt_textlt,
+	gbt_textcmp,
+	NULL
 };
-
 
 
 GISTENTRY *
@@ -246,12 +262,75 @@ gbt_num_consistent(const GBT_NUMKEY_R *key,
 	return (retval);
 }
 
+float *
+gbt_var_penalty(float *res, const GISTENTRY *o, const GISTENTRY *n,
+				Oid collation, const gbtree_vinfo *tinfo)
+{
+	GBT_VARKEY *orge = (GBT_VARKEY *) DatumGetPointer(o->key);
+	GBT_VARKEY *newe = (GBT_VARKEY *) DatumGetPointer(n->key);
+	GBT_VARKEY_R ok,
+				nk;
+
+	*res = 0.0;
+
+	nk = gbt_var_key_readable(newe);
+	if (nk.lower == nk.upper)	/* leaf */
+	{
+		GBT_VARKEY *tmp;
+
+		tmp = gbt_var_leaf2node(newe, tinfo);
+		if (tmp != newe)
+			nk = gbt_var_key_readable(tmp);
+	}
+	ok = gbt_var_key_readable(orge);
+
+	if ((VARSIZE(ok.lower) - VARHDRSZ) == 0 && (VARSIZE(ok.upper) - VARHDRSZ) == 0)
+		*res = 0.0;
+	else if (!(((*tinfo->f_cmp) (nk.lower, ok.lower, collation) >= 0 ||
+				gbt_bytea_pf_match(ok.lower, nk.lower, tinfo)) &&
+			   ((*tinfo->f_cmp) (nk.upper, ok.upper, collation) <= 0 ||
+				gbt_bytea_pf_match(ok.upper, nk.upper, tinfo))))
+	{
+		Datum		d = PointerGetDatum(0);
+		double		dres;
+		int32		ol,
+					ul;
+
+		gbt_var_bin_union(&d, orge, collation, tinfo);
+		ol = gbt_var_node_cp_len((GBT_VARKEY *) DatumGetPointer(d), tinfo);
+		gbt_var_bin_union(&d, newe, collation, tinfo);
+		ul = gbt_var_node_cp_len((GBT_VARKEY *) DatumGetPointer(d), tinfo);
+
+		if (ul < ol)
+		{
+			dres = (ol - ul);	/* reduction of common prefix len */
+		}
+		else
+		{
+			GBT_VARKEY_R uk = gbt_var_key_readable((GBT_VARKEY *) DatumGetPointer(d));
+			unsigned char tmp[4];
+
+			tmp[0] = (unsigned char) (((VARSIZE(ok.lower) - VARHDRSZ) <= ul) ? 0 : (VARDATA(ok.lower)[ul]));
+			tmp[1] = (unsigned char) (((VARSIZE(uk.lower) - VARHDRSZ) <= ul) ? 0 : (VARDATA(uk.lower)[ul]));
+			tmp[2] = (unsigned char) (((VARSIZE(ok.upper) - VARHDRSZ) <= ul) ? 0 : (VARDATA(ok.upper)[ul]));
+			tmp[3] = (unsigned char) (((VARSIZE(uk.upper) - VARHDRSZ) <= ul) ? 0 : (VARDATA(uk.upper)[ul]));
+			dres = Abs(tmp[0] - tmp[1]) + Abs(tmp[3] - tmp[2]);
+			dres /= 256.0;
+		}
+
+		*res += FLT_MIN;
+		*res += (float) (dres / ((double) (ol + 1)));
+		*res *= (FLT_MAX / (o->rel->rd_att->natts + 1));
+	}
+
+	return res;
+}
 
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	int32		query = PG_GETARG_INT32(1);
+	void	   *query = (void *) DatumGetTextP(PG_GETARG_DATUM(1));	
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
 	
 	/* Oid		subtype = PG_GETARG_OID(3); */
@@ -300,12 +379,12 @@ g_salary_decompress(PG_FUNCTION_ARGS)
 Datum
 g_salary_penalty(PG_FUNCTION_ARGS)
 {
-	int32KEY   *origentry = (int32KEY *) DatumGetPointer(((GISTENTRY *) PG_GETARG_POINTER(0))->key);
-	int32KEY   *newentry = (int32KEY *) DatumGetPointer(((GISTENTRY *) PG_GETARG_POINTER(1))->key);
+	GISTENTRY  *o = (GISTENTRY *) PG_GETARG_POINTER(0);
+	GISTENTRY  *n = (GISTENTRY *) PG_GETARG_POINTER(1);
 	float	   *result = (float *) PG_GETARG_POINTER(2);
 
-	penalty_num(result, origentry->lower, origentry->upper, newentry->lower, newentry->upper);
-	
+	gbt_var_penalty(result, o, n, PG_GET_COLLATION(),
+									  &tinfo);	
 				
 	PG_RETURN_POINTER(result);
 }
