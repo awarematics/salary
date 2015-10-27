@@ -11,25 +11,22 @@
 #include "./geohash/geohash.h"
 
 
-typedef struct int32key
-{
-	int32		lower;
-	int32		upper;
-} int32KEY;
-
-
 GISTENTRY *
-gbt_num_compress(GISTENTRY *retval, GISTENTRY *entry, const gbtree_ninfo *tinfo);
+gbt_var_compress(GISTENTRY *entry, const gbtree_vinfo *tinfo);
 bool
-gbt_num_consistent(const GBT_NUMKEY_R *key,
+gbt_var_consistent(GBT_VARKEY_R *key,
 				   const void *query,
-				   const StrategyNumber *strategy,
+				   StrategyNumber strategy,
+				   Oid collation,
 				   bool is_leaf,
-				   const gbtree_ninfo *tinfo);
-				   float *
+				   const gbtree_vinfo *tinfo);
+float *
 gbt_var_penalty(float *res, const GISTENTRY *o, const GISTENTRY *n,
 				Oid collation, const gbtree_vinfo *tinfo);
-				
+GIST_SPLITVEC *
+gbt_var_picksplit(const GistEntryVector *entryvec, GIST_SPLITVEC *v,
+				  Oid collation, const gbtree_vinfo *tinfo);				
+				  
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS);
 Datum
@@ -63,55 +60,37 @@ PG_FUNCTION_INFO_V1(g_salary_same);
 static bool
 gbt_textgt(const void *a, const void *b, Oid collation)
 {
-	return DatumGetBool(DirectFunctionCall2Coll(text_gt,
-												collation,
-												PointerGetDatum(a),
-												PointerGetDatum(b)));
+	return true;
 }
 
 static bool
 gbt_textge(const void *a, const void *b, Oid collation)
 {
-	return DatumGetBool(DirectFunctionCall2Coll(text_ge,
-												collation,
-												PointerGetDatum(a),
-												PointerGetDatum(b)));
+	return true;
 }
 
 static bool
 gbt_texteq(const void *a, const void *b, Oid collation)
 {
-	return DatumGetBool(DirectFunctionCall2Coll(texteq,
-												collation,
-												PointerGetDatum(a),
-												PointerGetDatum(b)));
+	return true;
 }
 
 static bool
 gbt_textle(const void *a, const void *b, Oid collation)
 {
-	return DatumGetBool(DirectFunctionCall2Coll(text_le,
-												collation,
-												PointerGetDatum(a),
-												PointerGetDatum(b)));
+	return true;
 }
 
 static bool
 gbt_textlt(const void *a, const void *b, Oid collation)
 {
-	return DatumGetBool(DirectFunctionCall2Coll(text_lt,
-												collation,
-												PointerGetDatum(a),
-												PointerGetDatum(b)));
+	return true;
 }
 
 static int32
 gbt_textcmp(const void *a, const void *b, Oid collation)
 {
-	return DatumGetInt32(DirectFunctionCall2Coll(bttextcmp,
-												 collation,
-												 PointerGetDatum(a),
-												 PointerGetDatum(b)));
+	return 1;
 }
 
 static gbtree_vinfo tinfo =
@@ -128,87 +107,69 @@ static gbtree_vinfo tinfo =
 	NULL
 };
 
+GBT_VARKEY_R
+gbt_var_key_readable(const GBT_VARKEY *k)
+{
+	GBT_VARKEY_R r;
+
+	r.lower = (bytea *) &(((char *) k)[VARHDRSZ]);
+	if (VARSIZE(k) > (VARHDRSZ + (VARSIZE(r.lower))))
+		r.upper = (bytea *) &(((char *) k)[VARHDRSZ + INTALIGN(VARSIZE(r.lower))]);
+	else
+		r.upper = r.lower;
+	return r;
+}
+
+
+GBT_VARKEY *
+gbt_var_key_copy(const GBT_VARKEY_R *u, bool force_node)
+{
+	GBT_VARKEY *r = NULL;
+	int32		lowersize = VARSIZE(u->lower);
+	int32		uppersize = VARSIZE(u->upper);
+
+	if (u->lower == u->upper && !force_node)
+	{							/* leaf key mode */
+		r = (GBT_VARKEY *) palloc(lowersize + VARHDRSZ);
+		memcpy(VARDATA(r), u->lower, lowersize);
+		SET_VARSIZE(r, lowersize + VARHDRSZ);
+	}
+	else
+	{							/* node key mode  */
+		r = (GBT_VARKEY *) palloc0(INTALIGN(lowersize) + uppersize + VARHDRSZ);
+		memcpy(VARDATA(r), u->lower, lowersize);
+		memcpy(VARDATA(r) + INTALIGN(lowersize), u->upper, uppersize);
+		SET_VARSIZE(r, INTALIGN(lowersize) + uppersize + VARHDRSZ);
+	}
+	return r;
+}
+
 
 GISTENTRY *
-gbt_num_compress(GISTENTRY *retval, GISTENTRY *entry, const gbtree_ninfo *tinfo)
+gbt_var_compress(GISTENTRY *entry, const gbtree_vinfo *tinfo)
 {
+	GISTENTRY  *retval;
+
 	if (entry->leafkey)
 	{
-		union
-		{
-			int16		i2;
-			int32		i4;
-			int64		i8;
-			float4		f4;
-			float8		f8;
-			DateADT		dt;
-			TimeADT		tm;
-			Timestamp	ts;
-			Cash		ch;
-		}			v;
+		GBT_VARKEY *r = NULL;
+		bytea	   *leaf = (bytea *) DatumGetPointer(PG_DETOAST_DATUM(entry->key));
+		GBT_VARKEY_R u;
 
-		GBT_NUMKEY *r = (GBT_NUMKEY *) palloc0(tinfo->indexsize);
-		void	   *leaf = NULL;
+		u.lower = u.upper = leaf;
+		r = gbt_var_key_copy(&u, FALSE);
 
-		switch (tinfo->t)
-		{
-			case gbt_t_int2:
-				v.i2 = DatumGetInt16(entry->key);
-				leaf = &v.i2;
-				break;
-			case gbt_t_int4:
-				v.i4 = DatumGetInt32(entry->key);
-				leaf = &v.i4;
-				break;
-			case gbt_t_int8:
-				v.i8 = DatumGetInt64(entry->key);
-				leaf = &v.i8;
-				break;
-			case gbt_t_oid:
-				v.i4 = DatumGetObjectId(entry->key);
-				leaf = &v.i4;
-				break;
-			case gbt_t_float4:
-				v.f4 = DatumGetFloat4(entry->key);
-				leaf = &v.f4;
-				break;
-			case gbt_t_float8:
-				v.f8 = DatumGetFloat8(entry->key);
-				leaf = &v.f8;
-				break;
-			case gbt_t_date:
-				v.dt = DatumGetDateADT(entry->key);
-				leaf = &v.dt;
-				break;
-			case gbt_t_time:
-				v.tm = DatumGetTimeADT(entry->key);
-				leaf = &v.tm;
-				break;
-			case gbt_t_ts:
-				v.ts = DatumGetTimestamp(entry->key);
-				leaf = &v.ts;
-				break;
-			case gbt_t_cash:
-				v.ch = DatumGetCash(entry->key);
-				leaf = &v.ch;
-				break;
-			default:
-				leaf = DatumGetPointer(entry->key);
-		}
-
-		Assert(tinfo->indexsize >= 2 * tinfo->size);
-
-		memcpy((void *) &r[0], leaf, tinfo->size);
-		memcpy((void *) &r[tinfo->size], leaf, tinfo->size);
 		retval = palloc(sizeof(GISTENTRY));
-		gistentryinit(*retval, PointerGetDatum(r), entry->rel, entry->page,
-					  entry->offset, FALSE);
+		gistentryinit(*retval, PointerGetDatum(r),
+					  entry->rel, entry->page,
+					  entry->offset, TRUE);
 	}
 	else
 		retval = entry;
 
-	return retval;
+	return (retval);
 }
+
 
 /*
  * The GiST consistent method
@@ -217,49 +178,63 @@ gbt_num_compress(GISTENTRY *retval, GISTENTRY *entry, const gbtree_ninfo *tinfo)
  * collation-aware; so we don't bother passing collation through.
  */
 bool
-gbt_num_consistent(const GBT_NUMKEY_R *key,
+gbt_var_consistent(GBT_VARKEY_R *key,
 				   const void *query,
-				   const StrategyNumber *strategy,
+				   StrategyNumber strategy,
+				   Oid collation,
 				   bool is_leaf,
-				   const gbtree_ninfo *tinfo)
+				   const gbtree_vinfo *tinfo)
 {
-	bool		retval;
+	bool		retval = FALSE;
 
-	switch (*strategy)
+	switch (strategy)
 	{
 		case BTLessEqualStrategyNumber:
-			retval = (*tinfo->f_ge) (query, key->lower);
+			if (is_leaf)
+				retval = (*tinfo->f_ge) (query, key->lower, collation);
+			else
+				retval = (*tinfo->f_cmp) (query, key->lower, collation) >= 0
+					|| gbt_var_node_pf_match(key, query, tinfo);
 			break;
 		case BTLessStrategyNumber:
 			if (is_leaf)
-				retval = (*tinfo->f_gt) (query, key->lower);
+				retval = (*tinfo->f_gt) (query, key->lower, collation);
 			else
-				retval = (*tinfo->f_ge) (query, key->lower);
+				retval = (*tinfo->f_cmp) (query, key->lower, collation) >= 0
+					|| gbt_var_node_pf_match(key, query, tinfo);
 			break;
 		case BTEqualStrategyNumber:
 			if (is_leaf)
-				retval = (*tinfo->f_eq) (query, key->lower);
+				retval = (*tinfo->f_eq) (query, key->lower, collation);
 			else
-				retval = ((*tinfo->f_le) (key->lower, query) && (*tinfo->f_le) (query, key->upper)) ? true : false;
+				retval =
+					((*tinfo->f_cmp) (key->lower, query, collation) <= 0 &&
+					 (*tinfo->f_cmp) (query, key->upper, collation) <= 0) ||
+					gbt_var_node_pf_match(key, query, tinfo);
 			break;
 		case BTGreaterStrategyNumber:
 			if (is_leaf)
-				retval = (*tinfo->f_lt) (query, key->upper);
+				retval = (*tinfo->f_lt) (query, key->upper, collation);
 			else
-				retval = (*tinfo->f_le) (query, key->upper);
+				retval = (*tinfo->f_cmp) (query, key->upper, collation) <= 0
+					|| gbt_var_node_pf_match(key, query, tinfo);
 			break;
 		case BTGreaterEqualStrategyNumber:
-			retval = (*tinfo->f_le) (query, key->upper);
+			if (is_leaf)
+				retval = (*tinfo->f_le) (query, key->upper, collation);
+			else
+				retval = (*tinfo->f_cmp) (query, key->upper, collation) <= 0
+					|| gbt_var_node_pf_match(key, query, tinfo);
 			break;
 		case BtreeGistNotEqualStrategyNumber:
-			retval = (!((*tinfo->f_eq) (query, key->lower) &&
-						(*tinfo->f_eq) (query, key->upper))) ? true : false;
+			retval = !((*tinfo->f_eq) (query, key->lower, collation) &&
+					   (*tinfo->f_eq) (query, key->upper, collation));
 			break;
 		default:
-			retval = false;
+			retval = FALSE;
 	}
 
-	return (retval);
+	return retval;
 }
 
 float *
@@ -320,33 +295,126 @@ gbt_var_penalty(float *res, const GISTENTRY *o, const GISTENTRY *n,
 
 		*res += FLT_MIN;
 		*res += (float) (dres / ((double) (ol + 1)));
-		*res *= (FLT_MAX / (o->rel->rd_att->natts + 1));
+		//*res *= (FLT_MAX / (o->rel->rd_att->natts + 1));
 	}
 
 	return res;
+}
+
+GIST_SPLITVEC *
+gbt_var_picksplit(const GistEntryVector *entryvec, GIST_SPLITVEC *v,
+				  Oid collation, const gbtree_vinfo *tinfo)
+{
+	OffsetNumber i,
+				maxoff = entryvec->n - 1;
+	Vsrt	   *arr;
+	int			svcntr = 0,
+				nbytes;
+	char	   *cur;
+	GBT_VARKEY **sv = NULL;
+	gbt_vsrt_arg varg;
+
+	arr = (Vsrt *) palloc((maxoff + 1) * sizeof(Vsrt));
+	nbytes = (maxoff + 2) * sizeof(OffsetNumber);
+	v->spl_left = (OffsetNumber *) palloc(nbytes);
+	v->spl_right = (OffsetNumber *) palloc(nbytes);
+	v->spl_ldatum = PointerGetDatum(0);
+	v->spl_rdatum = PointerGetDatum(0);
+	v->spl_nleft = 0;
+	v->spl_nright = 0;
+
+	sv = palloc(sizeof(bytea *) * (maxoff + 1));
+
+	/* Sort entries */
+
+	for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
+	{
+		GBT_VARKEY_R ro;
+
+		cur = (char *) DatumGetPointer(entryvec->vector[i].key);
+		ro = gbt_var_key_readable((GBT_VARKEY *) cur);
+		if (ro.lower == ro.upper)		/* leaf */
+		{
+			sv[svcntr] = gbt_var_leaf2node((GBT_VARKEY *) cur, tinfo);
+			arr[i].t = sv[svcntr];
+			if (sv[svcntr] != (GBT_VARKEY *) cur)
+				svcntr++;
+		}
+		else
+			arr[i].t = (GBT_VARKEY *) cur;
+		arr[i].i = i;
+	}
+
+	/* sort */
+	varg.tinfo = tinfo;
+	varg.collation = collation;
+	
+
+	/* We do simply create two parts */
+
+	for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
+	{
+		if (i <= (maxoff - FirstOffsetNumber + 1) / 2)
+		{
+			gbt_var_bin_union(&v->spl_ldatum, arr[i].t, collation, tinfo);
+			v->spl_left[v->spl_nleft] = arr[i].i;
+			v->spl_nleft++;
+		}
+		else
+		{
+			gbt_var_bin_union(&v->spl_rdatum, arr[i].t, collation, tinfo);
+			v->spl_right[v->spl_nright] = arr[i].i;
+			v->spl_nright++;
+		}
+	}
+
+	/* Truncate (=compress) key */
+	if (tinfo->trnc)
+	{
+		int32		ll = gbt_var_node_cp_len((GBT_VARKEY *) DatumGetPointer(v->spl_ldatum), tinfo);
+		int32		lr = gbt_var_node_cp_len((GBT_VARKEY *) DatumGetPointer(v->spl_rdatum), tinfo);
+		GBT_VARKEY *dl;
+		GBT_VARKEY *dr;
+
+		ll = Max(ll, lr);
+		ll++;
+
+		dl = gbt_var_node_truncate((GBT_VARKEY *) DatumGetPointer(v->spl_ldatum), ll, tinfo);
+		dr = gbt_var_node_truncate((GBT_VARKEY *) DatumGetPointer(v->spl_rdatum), ll, tinfo);
+		v->spl_ldatum = PointerGetDatum(dl);
+		v->spl_rdatum = PointerGetDatum(dr);
+	}
+
+	return v;
 }
 
 Datum
 g_salary_consistent(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	void	   *query = (void *) DatumGetTextP(PG_GETARG_DATUM(1));	
+	void	   *query = (void *) DatumGetTextP(PG_GETARG_DATUM(1));
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-	
+
 	/* Oid		subtype = PG_GETARG_OID(3); */
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
-	int32KEY   *kkk = (int32KEY *) DatumGetPointer(entry->key);
-	GBT_NUMKEY_R key;
+	bool		retval;
+	GBT_VARKEY *key = (GBT_VARKEY *) DatumGetPointer(entry->key);
+	GBT_VARKEY_R r = gbt_var_key_readable(key);
 
 	/* All cases served by this function are exact */
 	*recheck = false;
-	
-	key.lower = (GBT_NUMKEY *) &kkk->lower;
-	key.upper = (GBT_NUMKEY *) &kkk->upper;
 
-	PG_RETURN_BOOL(
-				   gbt_num_consistent(&key, (void *) &query, &strategy, GIST_LEAF(entry), &tinfo)
-		);	
+	/*
+	if (tinfo.eml == 0)
+	{
+		tinfo.eml = pg_database_encoding_max_length();
+	}
+	*/
+
+	retval = gbt_var_consistent(&r, query, strategy, PG_GET_COLLATION(),
+								GIST_LEAF(entry), &tinfo);
+
+	PG_RETURN_BOOL(retval);
 }
 
 
@@ -363,9 +431,15 @@ Datum
 g_salary_compress(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	GISTENTRY  *retval = NULL;
-
-	PG_RETURN_POINTER(gbt_num_compress(retval, entry, &tinfo));
+	
+	/*
+	if (tinfo.eml == 0)
+	{
+		tinfo.eml = pg_database_encoding_max_length();
+	}
+	*/
+	
+	PG_RETURN_POINTER(gbt_var_compress(entry, &tinfo));
 }
 
 Datum
@@ -383,10 +457,8 @@ g_salary_penalty(PG_FUNCTION_ARGS)
 	GISTENTRY  *n = (GISTENTRY *) PG_GETARG_POINTER(1);
 	float	   *result = (float *) PG_GETARG_POINTER(2);
 
-	gbt_var_penalty(result, o, n, PG_GET_COLLATION(),
-									  &tinfo);	
-				
-	PG_RETURN_POINTER(result);
+	PG_RETURN_POINTER(gbt_var_penalty(result, o, n, PG_GET_COLLATION(),
+									  &tinfo));
 }
 
 
@@ -406,8 +478,11 @@ Datum
 g_salary_picksplit(PG_FUNCTION_ARGS)
 {
 	
+	GistEntryVector *entryvec = (GistEntryVector *) PG_GETARG_POINTER(0);
 	GIST_SPLITVEC *v = (GIST_SPLITVEC *) PG_GETARG_POINTER(1);
 	
-				
+	gbt_var_picksplit(entryvec, v, PG_GET_COLLATION(),
+					  &tinfo);
+					  
 	PG_RETURN_POINTER(v);
 }
