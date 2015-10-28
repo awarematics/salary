@@ -42,14 +42,15 @@ Datum		gbtreekey_in(PG_FUNCTION_ARGS);
 
 Datum		gbtreekey_out(PG_FUNCTION_ARGS);
 
-
-typedef bytea GBT_VARKEY;
+/* Variable length key */
+typedef point GBT_VARKEY;
 
 /* Better readable key */
 typedef struct
 {
-	bytea	   *lower,
+	point	   *lower,
 			   *upper;
+	
 } GBT_VARKEY_R;
 
 
