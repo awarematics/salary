@@ -302,13 +302,29 @@ gbt_var_consistent(GBT_VARKEY_R *key,
 }
 
 text
-gbt_var_toGeohash(const GBT_VARKEY *k, int precision)
+gbt_var_MBRtoGeohash(const GBT_VARKEY_R *k)
 {
-	text hash = NULL;
+	int precision = 12;		
+	text minGeohash = NULL, maxGeohash = NULL, resultHash = NULL;
+	bool cmp = true;		
 	
-	hash = (text *) geohash_encode(k->x, k->y, precision);
+	do 
+	{
+		minGeohash = (text *) geohash_encode(k->xmin, k->ymin, precision);
+		maxGeohash = (text *) geohash_encode(k->xmax k->ymax, precision);
 	
-	return hash;
+		if (minGeohash = maxGeohash) 
+		{
+			cmp = true;		
+		} else 
+		{
+			cmp = false;
+		}
+		
+		precision--;
+	} while (cmp);
+		
+	return resultHash;
 }
 
 float *

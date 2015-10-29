@@ -3,7 +3,7 @@
  */
 
 #include "fmgr.h"
-#include "access/nbtree.h"
+#include "utils/geo_decls.h"	/* for point type */
 
 #define BtreeGistNotEqualStrategyNumber 6
 
@@ -43,13 +43,12 @@ Datum		gbtreekey_in(PG_FUNCTION_ARGS);
 Datum		gbtreekey_out(PG_FUNCTION_ARGS);
 
 /* Variable length key */
-typedef point GBT_VARKEY;
+typedef float8 GBT_VARKEY;
 
 /* Better readable key */
 typedef struct
 {
-	point	   *lower,
-			   *upper;
+	float8	   *xmin, *xmax, *ymin, *ymax;			   
 	
 } GBT_VARKEY_R;
 
