@@ -305,7 +305,7 @@ text
 gbt_var_MBRtoGeohash(const GBT_VARKEY_R *k)
 {
 	int precision = 12;		
-	text minGeohash = NULL, maxGeohash = NULL, resultHash = NULL;
+	text minGeohash = NULL, maxGeohash = NULL;
 	bool cmp = true;		
 	
 	do 
@@ -315,7 +315,7 @@ gbt_var_MBRtoGeohash(const GBT_VARKEY_R *k)
 	
 		if (minGeohash = maxGeohash) 
 		{
-			cmp = true;		
+			cmp = true;	
 		} else 
 		{
 			cmp = false;
@@ -324,7 +324,7 @@ gbt_var_MBRtoGeohash(const GBT_VARKEY_R *k)
 		precision--;
 	} while (cmp);
 		
-	return resultHash;
+	return minGeohash;
 }
 
 float *
