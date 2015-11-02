@@ -2,6 +2,21 @@
 
 #include "salary_gist.h"
 
+/* used for key sorting */
+typedef struct
+{
+	int			i;
+	GBT_VARKEY *t;
+} Vsrt;
+
+typedef struct
+{
+	const gbtree_vinfo *tinfo;
+	Oid			collation;
+} gbt_vsrt_arg;
+
+
+
 /* text_cmp()
  * Internal comparison function for text strings.
  * Returns -1, 0 or 1
@@ -232,6 +247,41 @@ gbt_var_compress(GISTENTRY *entry, const gbtree_vinfo *tinfo)
 		retval = entry;
 
 	return (retval);
+}
+
+
+/*
+ * returns true, if query matches prefix ( common prefix )
+ */
+static bool
+gbt_bytea_pf_match(const bytea *pf, const bytea *query, const gbtree_vinfo *tinfo)
+{
+	bool		out = FALSE;
+	int32		qlen = VARSIZE(query) - VARHDRSZ;
+	int32		nlen = VARSIZE(pf) - VARHDRSZ;
+
+	if (nlen <= qlen)
+	{
+		char	   *q = VARDATA(query);
+		char	   *n = VARDATA(pf);
+
+		out = (memcmp(q, n, nlen) == 0);
+	}
+
+	return out;
+}
+
+
+/*
+ * returns true, if query matches node using common prefix
+ */
+static bool
+gbt_var_node_pf_match(const GBT_VARKEY_R *node, const bytea *query, const gbtree_vinfo *tinfo)
+{
+	return (tinfo->trnc && (
+							gbt_bytea_pf_match(node->lower, query, tinfo) ||
+							gbt_bytea_pf_match(node->upper, query, tinfo)
+							));
 }
 
 
@@ -478,3 +528,95 @@ gbt_var_picksplit(const GistEntryVector *entryvec, GIST_SPLITVEC *v,
 	return v;
 }
 
+
+/*
+ * returns the common prefix length of a node key
+*/
+static int32
+gbt_var_node_cp_len(const GBT_VARKEY *node, const gbtree_vinfo *tinfo)
+{
+	GBT_VARKEY_R r = gbt_var_key_readable(node);
+	int32		i = 0;
+	int32		l = 0;
+	int32		t1len = VARSIZE(r.lower) - VARHDRSZ;
+	int32		t2len = VARSIZE(r.upper) - VARHDRSZ;
+	int32		ml = Min(t1len, t2len);
+	char	   *p1 = VARDATA(r.lower);
+	char	   *p2 = VARDATA(r.upper);
+
+	if (ml == 0)
+		return 0;
+
+	while (i < ml)
+	{
+		if (tinfo->eml > 1 && l == 0)
+		{
+			if ((l = pg_mblen(p1)) != pg_mblen(p2))
+			{
+				return i;
+			}
+		}
+		if (*p1 != *p2)
+		{
+			if (tinfo->eml > 1)
+			{
+				return (i - l + 1);
+			}
+			else
+			{
+				return i;
+			}
+		}
+
+		p1++;
+		p2++;
+		l--;
+		i++;
+	}
+	return (ml);				/* lower == upper */
+}
+
+
+
+static GBT_VARKEY *
+gbt_var_leaf2node(GBT_VARKEY *leaf, const gbtree_vinfo *tinfo)
+{
+	GBT_VARKEY *out = leaf;
+
+	if (tinfo->f_l2n)
+		out = (*tinfo->f_l2n) (leaf);
+
+	return out;
+}
+
+
+/*
+*  truncates / compresses the node key
+*  cpf_length .. common prefix length
+*/
+static GBT_VARKEY *
+gbt_var_node_truncate(const GBT_VARKEY *node, int32 cpf_length, const gbtree_vinfo *tinfo)
+{
+	GBT_VARKEY *out = NULL;
+	GBT_VARKEY_R r = gbt_var_key_readable(node);
+	int32		len1 = VARSIZE(r.lower) - VARHDRSZ;
+	int32		len2 = VARSIZE(r.upper) - VARHDRSZ;
+	int32		si;
+	char	   *out2;
+
+	len1 = Min(len1, (cpf_length + 1));
+	len2 = Min(len2, (cpf_length + 1));
+
+	si = 2 * VARHDRSZ + INTALIGN(len1 + VARHDRSZ) + len2;
+	out = (GBT_VARKEY *) palloc0(si);
+	SET_VARSIZE(out, si);
+
+	memcpy(VARDATA(out), r.lower, len1 + VARHDRSZ);
+	SET_VARSIZE(VARDATA(out), len1 + VARHDRSZ);
+
+	out2 = VARDATA(out) + INTALIGN(len1 + VARHDRSZ);
+	memcpy(out2, r.upper, len2 + VARHDRSZ);
+	SET_VARSIZE(out2, len2 + VARHDRSZ);
+
+	return out;
+}
