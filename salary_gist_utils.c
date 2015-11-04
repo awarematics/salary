@@ -185,6 +185,13 @@ bttextcmp(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(result);
 }
 
+/*
+2.
+
+그리고, 이 TBT_KEY와, TBT_KEY_RANGE의 값을 읽어 오고 저장하는
+node_key_to_range_key() 함수와
+range_key_to_node_key() 두개의 함수를 구현
+*/
 
 GBT_VARKEY_R
 gbt_var_key_readable(const GBT_VARKEY *k)
