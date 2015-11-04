@@ -52,6 +52,16 @@ typedef struct
 	
 } GBT_VARKEY_R;
 
+/*
+
+1.
+이름을 TrajectoryBTree라고 하자. 줄여서 TBT라고 할떄, 
+사용될 b-tree내에  범위(range)값을 단일값으로 저장하는  TBT_KEY_IN_NODE
+그리고 TBT_KEY_IN_NODE에 있는 데이터가 intermediate 노드일 경우 범위값으로 저장하는 자료구조로  TBT_KEY_IN_RANGE
+두개를 선언하자. 
+
+*/
+
 
 /*
  * type description
